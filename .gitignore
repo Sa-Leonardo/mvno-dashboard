@@ -1,0 +1,9 @@
+.env
+.codex/
+github.com/
+data/
+dist/
+*.exe
+*.db
+*.db-shm
+*.db-wal
