@@ -53,7 +53,7 @@ type Contract struct {
 
 type LastRechargeResponse struct {
 	LastRecharge  string `json:"ultima_recarga"`
-	StatusCodeTip string `json:"codigo_status_tip"`
+	StatusCodeTip any    `json:"codigo_status_tip"`
 }
 
 type AddBalanceResponse struct {

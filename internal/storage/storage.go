@@ -189,6 +189,7 @@ func (s *Store) ListDueICCIDs(ctx context.Context, now time.Time) ([]domain.ICCI
 		where auto_recharge_enabled = 1
 		  and next_recharge_due_at is not null
 		  and next_recharge_due_at <= ?
+		  and upper(trim(contract_status)) = 'EM USO'
 		order by next_recharge_due_at asc`, formatDate(now))
 	if err != nil {
 		return nil, err
@@ -281,11 +282,14 @@ func (s *Store) FinishAutomationRun(ctx context.Context, id int64, status string
 	return err
 }
 
-func (s *Store) NextRun(ctx context.Context) (*time.Time, int, error) {
+func (s *Store) NextRun(ctx context.Context, now time.Time) (*time.Time, int, error) {
 	var value sql.NullString
 	var count int
 	err := s.db.QueryRowContext(ctx, `select min(next_recharge_due_at), count(*) from iccids
-		where auto_recharge_enabled = 1 and next_recharge_due_at is not null`).Scan(&value, &count)
+		where auto_recharge_enabled = 1
+		  and next_recharge_due_at is not null
+		  and next_recharge_due_at >= ?
+		  and upper(trim(contract_status)) = 'EM USO'`, formatDate(now)).Scan(&value, &count)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -297,6 +301,22 @@ func (s *Store) NextRun(ctx context.Context) (*time.Time, int, error) {
 		return nil, count, err
 	}
 	return &t, count, nil
+}
+
+func (s *Store) ListNextRunICCIDs(ctx context.Context, next time.Time) ([]domain.ICCID, error) {
+	rows, err := s.db.QueryContext(ctx, `select id, cnpj, subscriber_name, sim_card, phone_number, contract_number,
+		contract_status, plan_name, last_recharge_at, next_recharge_due_at, default_quantity,
+		recharge_interval_months, safety_window_days, auto_recharge_enabled, last_sync_at, created_at, updated_at
+		from iccids
+		where auto_recharge_enabled = 1
+		  and next_recharge_due_at = ?
+		  and upper(trim(contract_status)) = 'EM USO'
+		order by cnpj asc, sim_card asc`, formatDate(next))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanICCIDs(rows)
 }
 
 type scanner interface {

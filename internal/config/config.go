@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -19,6 +20,8 @@ type Config struct {
 	RechargeIntervalMonths   int
 	RechargeSafetyWindowDays int
 	DefaultRechargeQuantity  int
+	ProviderRequestDelay     time.Duration
+	EnableRealRecharge       bool
 }
 
 func Load() (Config, error) {
@@ -34,6 +37,8 @@ func Load() (Config, error) {
 		RechargeIntervalMonths:   getEnvInt("RECHARGE_INTERVAL_MONTHS", 11),
 		RechargeSafetyWindowDays: getEnvInt("RECHARGE_SAFETY_WINDOW_DAYS", 10),
 		DefaultRechargeQuantity:  getEnvInt("DEFAULT_RECHARGE_QUANTITY", 1),
+		ProviderRequestDelay:     time.Duration(getEnvInt("PROVIDER_REQUEST_DELAY_MS", 1200)) * time.Millisecond,
+		EnableRealRecharge:       getEnvBool("ENABLE_REAL_RECHARGE", false),
 	}
 
 	if cfg.AdminKey == "" {
@@ -76,6 +81,14 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	return value == "1" || value == "true" || value == "yes" || value == "sim"
 }
 
 func parseCSV(value string) []string {

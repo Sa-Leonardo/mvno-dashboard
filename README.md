@@ -17,6 +17,8 @@ DATABASE_PATH=./data/app.db
 RECHARGE_INTERVAL_MONTHS=11
 RECHARGE_SAFETY_WINDOW_DAYS=10
 DEFAULT_RECHARGE_QUANTITY=1
+PROVIDER_REQUEST_DELAY_MS=1200
+ENABLE_REAL_RECHARGE=false
 ```
 
 ## Rodar
@@ -38,6 +40,14 @@ Todos os endpoints abaixo, exceto `/health`, exigem:
 ```text
 X-Admin-Key: sua_chave
 ```
+
+Tambem e aceito:
+
+```text
+x-api-key: sua_chave
+```
+
+Use o mesmo valor configurado em `ADMIN_KEY` no `.env`.
 
 ### Saude
 
@@ -61,6 +71,8 @@ Consulta a ultima recarga de cada ICCID salvo e calcula `next_recharge_due_at`.
 POST /sync/ultima-recarga
 ```
 
+Por causa do rate limit da API externa, essa rotina espera `PROVIDER_REQUEST_DELAY_MS` entre consultas. O padrao recomendado e `1200`, que fica abaixo de 60 chamadas por minuto.
+
 ### Listar ICCIDs
 
 ```text
@@ -77,9 +89,27 @@ Body:
 
 ```json
 {
-  "quantity": 1
+  "quantity": 1,
+  "dry_run": true
 }
 ```
+
+Para chamar a API real de recarga, configure no `.env`:
+
+```text
+ENABLE_REAL_RECHARGE=true
+```
+
+Depois reinicie o servidor e envie:
+
+```json
+{
+  "quantity": 1,
+  "dry_run": false
+}
+```
+
+Atencao: a API externa pode aplicar uma franquia diferente da quantidade enviada, conforme regra da operadora/plano. Em teste real, foi observado que `quantity: 1` pode resultar em credito maior no provedor.
 
 ### Rotina para n8n
 
@@ -110,6 +140,20 @@ Execucao real:
 ```text
 GET /automation/next-run
 ```
+
+Esse endpoint considera apenas ICCIDs acionaveis:
+
+```text
+auto_recharge_enabled = true
+contract_status = EM USO
+next_recharge_due_at >= hoje
+```
+
+Resposta inclui `next_recharge_iccids`, com os ICCIDs e CNPJs que pertencem a proxima data de recarga.
+
+## Respostas da automacao
+
+`POST /automation/check-recharges` retorna, em `results`, o ICCID, CNPJ, nome do assinante e dados da operacao para cada item avaliado ou recarregado.
 
 ## Regra preventiva
 
