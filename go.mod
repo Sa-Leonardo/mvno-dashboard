@@ -1,4 +1,4 @@
-module chipmov
+module mvnodashboard
 
 go 1.22
 

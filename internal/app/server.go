@@ -12,16 +12,17 @@ import (
 	"strings"
 	"time"
 
-	"chipmov/internal/config"
-	"chipmov/internal/domain"
-	"chipmov/internal/easy2use"
-	"chipmov/internal/storage"
+	"mvnodashboard/internal/config"
+	"mvnodashboard/internal/domain"
+	"mvnodashboard/internal/easy2use"
+	"mvnodashboard/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Provider interface {
 	ListSubscribers(ctx context.Context) (easy2use.ListSubscribersResponse, []byte, int, error)
+	ListStock(ctx context.Context) (easy2use.ListStockResponse, []byte, int, error)
 	LastRecharge(ctx context.Context, simCard string) (easy2use.LastRechargeResponse, []byte, int, error)
 	AddBalance(ctx context.Context, simCard string, quantity int) (easy2use.AddBalanceResponse, []byte, int, error)
 }
@@ -40,17 +41,27 @@ func NewServer(cfg config.Config, store *storage.Store, provider Provider, logge
 func (s *Server) Router() http.Handler {
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Static("/assets", "./web/assets")
+	router.StaticFile("/", "./web/index.html")
+	router.StaticFile("/relatorios", "./web/relatorios.html")
 	router.GET("/health", s.health)
 
 	protected := router.Group("/")
 	protected.Use(s.adminAuth())
 	protected.POST("/sync/assinantes", s.syncSubscribers)
+	protected.POST("/sync/estoque", s.syncStock)
 	protected.POST("/sync/ultima-recarga", s.syncLastRecharges)
 	protected.GET("/iccids", s.listICCIDs)
+	protected.GET("/iccids/summary", s.iccidSummary)
 	protected.POST("/iccids/:iccid/saldo", s.addBalanceManual)
 	protected.POST("/automation/check-recharges", s.checkRecharges)
 	protected.GET("/automation/next-run", s.nextRun)
+	protected.GET("/recharge-approvals", s.listApprovals)
+	protected.POST("/recharge-approvals/:id/approve", s.approveRecharge)
+	protected.POST("/recharge-approvals/:id/reject", s.rejectRecharge)
+	protected.POST("/dev/iccids/:iccid/force-due", s.forceDueDev)
 	protected.GET("/operacoes", s.listOperations)
+	protected.POST("/dev/iccids/:iccid/force-status", s.forceStatusDev)
 
 	return router
 }
@@ -95,8 +106,15 @@ func (s *Server) syncSubscribers(c *gin.Context) {
 	}
 
 	totalContracts := 0
+	allowedSubscribers := 0
+	allowedContracts := 0
 	saved := 0
 	skipped := 0
+	savedByCNPJ := map[string]int{}
+	savedByStatus := map[string]int{}
+	allowedContractsByCNPJ := map[string]int{}
+	savedAllowed := 0
+	savedNonAllowed := 0
 	for _, subscriber := range resp.Results {
 		cnpj := config.OnlyDigits(subscriber.Document)
 		allowed, err := s.store.IsAllowedCNPJ(ctx, cnpj)
@@ -104,11 +122,21 @@ func (s *Server) syncSubscribers(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if allowed {
+			allowedSubscribers++
+		}
 		for _, contract := range subscriber.Contracts {
 			totalContracts++
-			if !allowed || strings.TrimSpace(contract.SimCard) == "" {
+			if strings.TrimSpace(contract.SimCard) == "" {
 				skipped++
 				continue
+			}
+			if allowed {
+				allowedContracts++
+				allowedContractsByCNPJ[cnpj]++
+				savedAllowed++
+			} else {
+				savedNonAllowed++
 			}
 			if err := s.store.UpsertICCID(ctx, storage.UpsertICCIDParams{
 				CNPJ:                   cnpj,
@@ -126,14 +154,91 @@ func (s *Server) syncSubscribers(c *gin.Context) {
 				return
 			}
 			saved++
+			savedByCNPJ[cnpj]++
+			status := strings.TrimSpace(contract.Status)
+			if status == "" {
+				status = "(vazio)"
+			}
+			savedByStatus[status]++
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"total_subscribers": len(resp.Results),
-		"total_contracts":   totalContracts,
+		"total_subscribers":         len(resp.Results),
+		"total_contracts":           totalContracts,
+		"allowed_subscribers":       allowedSubscribers,
+		"allowed_contracts":         allowedContracts,
+		"allowed_contracts_by_cnpj": allowedContractsByCNPJ,
+		"saved":                     saved,
+		"saved_allowed":             savedAllowed,
+		"saved_non_allowed":         savedNonAllowed,
+		"saved_by_cnpj":             savedByCNPJ,
+		"saved_by_status":           savedByStatus,
+		"skipped":                   skipped,
+	})
+}
+
+func (s *Server) syncStock(c *gin.Context) {
+	ctx := c.Request.Context()
+	resp, raw, statusCode, err := s.provider.ListStock(ctx)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":                  err.Error(),
+			"status_code":            statusCode,
+			"provider_response_body": string(raw),
+			"hint":                   "Confira EASY2USE_BASE_URL e EASY2USE_USER_TOKEN no .env",
+		})
+		return
+	}
+	if !easy2use.StatusCodeTipOK(resp.StatusCodeTip) {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "provider returned non-success codigo_status_tip", "codigo_status_tip": resp.StatusCodeTip})
+		return
+	}
+
+	saved := 0
+	skipped := 0
+	savedByStatus := map[string]int{}
+	savedByOperator := map[string]int{}
+	esimCount := 0
+	for _, item := range resp.Results {
+		simCard := strings.TrimSpace(item.SimCard)
+		if simCard == "" {
+			skipped++
+			continue
+		}
+		if err := s.store.UpsertStockSIM(ctx, storage.UpsertStockSIMParams{
+			SimCard:  simCard,
+			Status:   strings.TrimSpace(item.Status),
+			Date:     item.Date,
+			ESim:     item.ESim,
+			Operator: item.Operator,
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		saved++
+		status := strings.TrimSpace(item.Status)
+		if status == "" {
+			status = "(vazio)"
+		}
+		operator := strings.TrimSpace(item.Operator)
+		if operator == "" {
+			operator = "(vazio)"
+		}
+		savedByStatus[status]++
+		savedByOperator[operator]++
+		if item.ESim != nil && *item.ESim {
+			esimCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_stock_items": len(resp.Results),
 		"saved":             saved,
 		"skipped":           skipped,
+		"saved_by_status":   savedByStatus,
+		"saved_by_operator": savedByOperator,
+		"esim_count":        esimCount,
 	})
 }
 
@@ -208,6 +313,15 @@ func (s *Server) listICCIDs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (s *Server) iccidSummary(c *gin.Context) {
+	items, err := s.store.ICCIDSummary(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
 type addBalanceRequest struct {
 	Quantity int  `json:"quantity"`
 	DryRun   bool `json:"dry_run"`
@@ -228,7 +342,8 @@ func (s *Server) addBalanceManual(c *gin.Context) {
 }
 
 type checkRechargesRequest struct {
-	DryRun bool `json:"dry_run"`
+	DryRun          bool `json:"dry_run"`
+	CreateApprovals bool `json:"create_approvals"`
 }
 
 func (s *Server) checkRecharges(c *gin.Context) {
@@ -251,6 +366,39 @@ func (s *Server) checkRecharges(c *gin.Context) {
 	if err != nil {
 		_ = s.store.FinishAutomationRun(ctx, runID, "failed", 0, 0, 0, 1, err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if req.CreateApprovals {
+		created := 0
+		existing := 0
+		results := []gin.H{}
+		for _, item := range due {
+			approval, wasCreated, err := s.store.UpsertPendingApproval(ctx, item, "ICCID dentro da janela de recarga preventiva")
+			if err != nil {
+				_ = s.store.FinishAutomationRun(ctx, runID, "failed", len(due), 0, 0, 1, err.Error())
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if wasCreated {
+				created++
+			} else {
+				existing++
+			}
+			results = append(results, gin.H{
+				"approval": approval,
+				"created":  wasCreated,
+			})
+		}
+		summaryBytes, _ := json.Marshal(results)
+		_ = s.store.FinishAutomationRun(ctx, runID, "approval_pending", len(due), 0, existing, 0, string(summaryBytes))
+		c.JSON(http.StatusOK, gin.H{
+			"run_id":             runID,
+			"checked":            len(due),
+			"created_approvals":  created,
+			"existing_approvals": existing,
+			"results":            results,
+			"automation_state":   "approval_pending",
+		})
 		return
 	}
 	if !req.DryRun && !s.cfg.EnableRealRecharge {
@@ -354,6 +502,130 @@ func (s *Server) nextRun(c *gin.Context) {
 	})
 }
 
+func (s *Server) listApprovals(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	items, err := s.store.ListApprovals(c.Request.Context(), c.Query("status"), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (s *Server) approveRecharge(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid approval id"})
+		return
+	}
+	ctx := c.Request.Context()
+	approval, err := s.store.GetApproval(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "approval not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if approval.Status != "pending" {
+		c.JSON(http.StatusConflict, gin.H{"error": "approval is not pending", "approval": approval})
+		return
+	}
+	if !s.cfg.EnableRealRecharge {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":    "real recharge is disabled",
+			"hint":     "Configure ENABLE_REAL_RECHARGE=true no .env para aprovar e executar recarga real.",
+			"approval": approval,
+		})
+		return
+	}
+	if err := s.store.MarkApprovalApproved(ctx, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.store.MarkApprovalProcessing(ctx, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	result, status, err := s.addBalance(ctx, approval.SimCard, approval.Quantity, "approval", false)
+	operationID := operationIDFromResult(result)
+	if err != nil {
+		_ = s.store.FinishApproval(ctx, id, "failed", operationID)
+		c.JSON(status, gin.H{"error": err.Error(), "approval_id": id, "operation": result})
+		return
+	}
+	_ = s.store.FinishApproval(ctx, id, "success", operationID)
+	c.JSON(http.StatusOK, gin.H{"approval_id": id, "operation": result, "status": "success"})
+}
+
+func (s *Server) rejectRecharge(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid approval id"})
+		return
+	}
+	if err := s.store.RejectApproval(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"approval_id": id, "status": "rejected"})
+}
+
+func (s *Server) forceDueDev(c *gin.Context) {
+	if !s.cfg.EnableDevRoutes {
+		c.JSON(http.StatusNotFound, gin.H{"error": "dev routes are disabled"})
+		return
+	}
+	item, err := s.store.ForceDueToday(c.Request.Context(), strings.TrimSpace(c.Param("iccid")), time.Now())
+	if errors.Is(err, sql.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "iccid not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "ICCID marcado como elegivel para recarga hoje apenas no banco local",
+		"iccid":   item,
+	})
+}
+
+type forceStatusRequest struct {
+	Status string `json:"status"`
+}
+
+func (s *Server) forceStatusDev(c *gin.Context) {
+	if !s.cfg.EnableDevRoutes {
+		c.JSON(http.StatusNotFound, gin.H{"error": "dev routes are disabled"})
+		return
+	}
+	var req forceStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json body"})
+		return
+	}
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status is required"})
+		return
+	}
+	item, err := s.store.ForceContractStatus(c.Request.Context(), strings.TrimSpace(c.Param("iccid")), status)
+	if errors.Is(err, sql.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "iccid not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Status do ICCID alterado apenas no banco local para teste",
+		"iccid":   item,
+	})
+}
+
 func (s *Server) listOperations(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	ops, err := s.store.ListOperations(c.Request.Context(), limit)
@@ -375,7 +647,7 @@ func (s *Server) addBalance(ctx context.Context, simCard string, quantity int, t
 
 	item, err := s.store.GetICCID(ctx, simCard)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, http.StatusForbidden, errors.New("iccid not found in local allowed database; run /sync/assinantes first")
+		return nil, http.StatusForbidden, errors.New("iccid not found in local database; run /sync/assinantes first")
 	}
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
@@ -403,6 +675,19 @@ func (s *Server) addBalance(ctx context.Context, simCard string, quantity int, t
 		}, http.StatusForbidden, errors.New("real recharge is disabled; set ENABLE_REAL_RECHARGE=true to allow provider calls")
 	}
 
+	if dryRun {
+		return gin.H{
+			"dry_run":         true,
+			"sim_card":        item.SimCard,
+			"cnpj":            item.CNPJ,
+			"subscriber_name": item.SubscriberName,
+			"contract_status": item.ContractStatus,
+			"quantity":        quantity,
+			"status":          "dry_run",
+			"message":         "Simulacao concluida. Nenhuma chamada foi enviada ao provedor.",
+		}, http.StatusOK, nil
+	}
+
 	requestPayload := fmt.Sprintf(`{"quantity":%d}`, quantity)
 	opID, err := s.store.CreateOperation(ctx, domain.GBOperation{
 		SimCard:        item.SimCard,
@@ -414,10 +699,6 @@ func (s *Server) addBalance(ctx context.Context, simCard string, quantity int, t
 	})
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
-	}
-
-	if dryRun {
-		return gin.H{"operation_id": opID, "dry_run": true, "iccid": item}, http.StatusOK, nil
 	}
 
 	resp, raw, statusCode, err := s.provider.AddBalance(ctx, item.SimCard, quantity)
@@ -452,6 +733,7 @@ func (s *Server) addBalance(ctx context.Context, simCard string, quantity int, t
 	}
 
 	now := time.Now()
+	nextRecharge := domain.ComputeNextRecharge(now, item.RechargeIntervalMonths, item.SafetyWindowDays)
 	if err := s.store.UpdateLastRecharge(ctx, item.SimCard, now, item.RechargeIntervalMonths, item.SafetyWindowDays); err != nil {
 		_ = s.store.FinishOperation(ctx, opID, "failed", &code, resp.UserMessage, responsePayload, err.Error())
 		return gin.H{"operation_id": opID}, http.StatusInternalServerError, err
@@ -461,13 +743,33 @@ func (s *Server) addBalance(ctx context.Context, simCard string, quantity int, t
 	}
 
 	return gin.H{
-		"operation_id":      opID,
-		"sim_card":          item.SimCard,
-		"cnpj":              item.CNPJ,
-		"subscriber_name":   item.SubscriberName,
-		"contract_status":   item.ContractStatus,
-		"quantity":          quantity,
-		"status":            "success",
-		"provider_response": resp,
+		"operation_id":         opID,
+		"sim_card":             item.SimCard,
+		"cnpj":                 item.CNPJ,
+		"subscriber_name":      item.SubscriberName,
+		"contract_status":      item.ContractStatus,
+		"quantity":             quantity,
+		"status":               "success",
+		"last_recharge_at":     now,
+		"next_recharge_due_at": nextRecharge,
+		"provider_response":    resp,
 	}, http.StatusOK, nil
+}
+
+func operationIDFromResult(result gin.H) *int64 {
+	if result == nil {
+		return nil
+	}
+	switch value := result["operation_id"].(type) {
+	case int64:
+		return &value
+	case int:
+		id := int64(value)
+		return &id
+	case float64:
+		id := int64(value)
+		return &id
+	default:
+		return nil
+	}
 }

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Relatorios - MVNO Dashboard</title>
+    <link rel="stylesheet" href="/assets/app.css">
+  </head>
+  <body class="reports-page">
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">CM</div>
+          <div>
+            <strong>MVNO Dashboard</strong>
+            <span>Relatorios da base</span>
+          </div>
+        </div>
+        <nav class="side-nav" aria-label="Navegacao principal">
+          <a href="/">Dashboard</a>
+          <a href="/#iccids-section">ICCIDs</a>
+          <a href="/#manual-recharge-section">Recarga manual</a>
+          <a href="/#operations-section">Operacoes</a>
+          <a href="/relatorios">Relatorios</a>
+        </nav>
+      </aside>
+
+      <div class="content-frame">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Relatorio geral</p>
+            <h1>Todos os contratos presentes na base</h1>
+          </div>
+          <div class="auth-box">
+            <label for="adminKey">Chave interna</label>
+            <div class="auth-row">
+              <input id="adminKey" type="password" autocomplete="off" placeholder="x-api-key">
+              <button id="saveKeyBtn" type="button">Salvar</button>
+            </div>
+          </div>
+        </header>
+
+        <main class="shell">
+          <section class="toolbar" aria-label="Acoes do relatorio">
+            <button id="refreshBtn" type="button">Atualizar relatorio</button>
+            <button id="syncSubscribersBtn" type="button" class="secondary">Sincronizar base</button>
+            <button id="syncStockBtn" type="button" class="secondary">Sincronizar estoque</button>
+            <button id="syncLastRechargeBtn" type="button" class="secondary">Atualizar ultima recarga</button>
+          </section>
+
+          <section id="statusMessage" class="status-message" hidden></section>
+
+          <section class="panel">
+            <div class="panel-head table-actions">
+              <div>
+                <h2>Premissas financeiras</h2>
+                <p>Planos MOV conhecidos usam a tabela de valores cadastrada; use o fallback apenas para planos nao reconhecidos.</p>
+              </div>
+              <div class="filters">
+                <input id="avgActiveRevenue" type="number" min="0" step="0.01" placeholder="Fallback plano desconhecido">
+                <button id="saveFinanceBtn" type="button" class="secondary">Salvar premissa</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="metrics-grid">
+            <article class="metric">
+              <span>Total na base</span>
+              <strong id="metricTotal">-</strong>
+            </article>
+            <article class="metric">
+              <span>Chips disponiveis</span>
+              <strong id="metricAvailable">-</strong>
+            </article>
+            <article class="metric">
+              <span>Chips em uso / ativo</span>
+              <strong id="metricActive">-</strong>
+            </article>
+            <article class="metric">
+              <span>Chips cancelados</span>
+              <strong id="metricCancelled">-</strong>
+            </article>
+          </section>
+
+          <section class="metrics-grid">
+            <article class="metric">
+              <span>Chips bloqueados</span>
+              <strong id="metricBlocked">-</strong>
+            </article>
+            <article class="metric">
+              <span>Outros status</span>
+              <strong id="metricOther">-</strong>
+            </article>
+            <article class="metric">
+              <span>Receita ativa mensal</span>
+              <strong id="metricRevenue">-</strong>
+            </article>
+            <article class="metric">
+              <span>Vencidos ou hoje</span>
+              <strong id="metricDue">-</strong>
+            </article>
+          </section>
+
+          <section class="grid-two">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Relatorio CNPJs MOV</h2>
+                  <p>Somente MOV Fit e MOV Fibra, os CNPJs autorizados para recarga.</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Empresa / CNPJ</th>
+                      <th>Total</th>
+                      <th>Disponiveis</th>
+                      <th>Ativos</th>
+                      <th>Cancelados</th>
+                      <th>Bloqueados</th>
+                      <th>Receita estimada</th>
+                    </tr>
+                  </thead>
+                  <tbody id="movSummaryBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Detalhamento financeiro</h2>
+                  <p>Receita por plano com valores MOV cadastrados e fallback para nomes nao reconhecidos.</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Plano</th>
+                      <th>Rede</th>
+                      <th>Ativos</th>
+                      <th>Valor unit.</th>
+                      <th>Receita mensal</th>
+                      <th>GB identificado</th>
+                      <th>Reconhecido</th>
+                    </tr>
+                  </thead>
+                  <tbody id="financeSummaryBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="grid-two">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Relatorio toda base</h2>
+                  <p>Distribuicao por CNPJ salvo na base local, incluindo empresas fora da automacao.</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Empresa / CNPJ</th>
+                      <th>Total</th>
+                      <th>Disponiveis</th>
+                      <th>Em uso</th>
+                      <th>Bloqueado</th>
+                      <th>Cancelado</th>
+                      <th>Receita estimada</th>
+                    </tr>
+                  </thead>
+                  <tbody id="companySummaryBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Status geral</h2>
+                  <p>Distribuicao consolidada dos ICCIDs por status.</p>
+                </div>
+              </div>
+              <div class="donut-panel">
+                <div id="statusDonut" class="donut-chart" aria-label="Grafico de status"></div>
+                <div id="statusLegend" class="donut-legend"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel compact-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Disponiveis por tipo</h2>
+                <p>Leitura dos dados de estoque quando a API informa eSIM ou chip fisico.</p>
+              </div>
+              <div class="stock-type-grid">
+                <div>
+                  <span>eSIM</span>
+                  <strong id="metricAvailableEsim">-</strong>
+                </div>
+                <div>
+                  <span>Fisicos</span>
+                  <strong id="metricAvailablePhysical">-</strong>
+                </div>
+                <div>
+                  <span>Sem ultima recarga</span>
+                  <strong id="metricNoRecharge">-</strong>
+                </div>
+                <div>
+                  <span>Status diferentes</span>
+                  <strong id="metricStatusTypes">-</strong>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head table-actions">
+              <div>
+                <h2>Relatorio completo de ICCIDs</h2>
+                <p>Todos os contratos sincronizados, inclusive fora dos CNPJs autorizados para recarga.</p>
+              </div>
+              <div class="filters">
+                <input id="reportFilter" type="search" placeholder="Filtrar por ICCID, telefone, empresa, CNPJ ou status">
+                <select id="statusFilter">
+                  <option value="">Todos</option>
+                  <option value="DISPONÍVEL">DISPONÍVEL</option>
+                  <option value="EM USO">EM USO</option>
+                  <option value="BLOQUEADO">BLOQUEADO</option>
+                  <option value="CANCELADO">CANCELADO</option>
+                  <option value="PORTOUT">PORTOUT</option>
+                  <option value="INEXISTENTE">INEXISTENTE</option>
+                </select>
+              </div>
+            </div>
+            <div id="reportCount" class="table-meta"></div>
+            <div class="table-wrap tall">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ICCID</th>
+                    <th>Telefone</th>
+                    <th>Empresa / CNPJ</th>
+                    <th>Assinante</th>
+                    <th>Contrato</th>
+                    <th>Status</th>
+                    <th>Status estoque</th>
+                    <th>Operadora</th>
+                    <th>eSIM</th>
+                    <th>Plano</th>
+                    <th>Ultima recarga</th>
+                    <th>Proxima recarga</th>
+                    <th>Atualizado em</th>
+                  </tr>
+                </thead>
+                <tbody id="reportBody"></tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <button id="loadMoreBtn" type="button" class="secondary">Carregar mais</button>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div id="confirmModal" class="modal-backdrop" hidden>
+      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <div class="confirm-icon">!</div>
+        <div>
+          <h2 id="confirmTitle">Confirmar acao</h2>
+          <p id="confirmMessage"></p>
+        </div>
+        <div class="modal-actions">
+          <button id="confirmCancelBtn" type="button" class="secondary">Cancelar</button>
+          <button id="confirmOkBtn" type="button">Confirmar</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/assets/reports.js"></script>
+  </body>
+</html>

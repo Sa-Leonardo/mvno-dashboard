@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,10 +23,11 @@ type Config struct {
 	DefaultRechargeQuantity  int
 	ProviderRequestDelay     time.Duration
 	EnableRealRecharge       bool
+	EnableDevRoutes          bool
 }
 
 func Load() (Config, error) {
-	_ = loadDotEnv(".env")
+	_ = loadDotEnv(findDotEnv())
 
 	cfg := Config{
 		AppAddr:                  getEnv("APP_ADDR", ":8080"),
@@ -39,6 +41,7 @@ func Load() (Config, error) {
 		DefaultRechargeQuantity:  getEnvInt("DEFAULT_RECHARGE_QUANTITY", 1),
 		ProviderRequestDelay:     time.Duration(getEnvInt("PROVIDER_REQUEST_DELAY_MS", 1200)) * time.Millisecond,
 		EnableRealRecharge:       getEnvBool("ENABLE_REAL_RECHARGE", false),
+		EnableDevRoutes:          getEnvBool("ENABLE_DEV_ROUTES", false),
 	}
 
 	if cfg.AdminKey == "" {
@@ -61,6 +64,24 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func findDotEnv() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ".env"
+	}
+	for {
+		path := filepath.Join(dir, ".env")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			return ".env"
+		}
+		dir = next
+	}
 }
 
 func getEnv(key, fallback string) string {

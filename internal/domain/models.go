@@ -11,6 +11,11 @@ type ICCID struct {
 	ContractNumber         string     `json:"contract_number"`
 	ContractStatus         string     `json:"contract_status"`
 	PlanName               string     `json:"plan_name"`
+	StockStatus            string     `json:"stock_status,omitempty"`
+	StockIncludedAt        *time.Time `json:"stock_included_at,omitempty"`
+	ESim                   *bool      `json:"esim,omitempty"`
+	Operator               string     `json:"operator,omitempty"`
+	StockSyncAt            *time.Time `json:"stock_sync_at,omitempty"`
 	LastRechargeAt         *time.Time `json:"last_recharge_at,omitempty"`
 	NextRechargeDueAt      *time.Time `json:"next_recharge_due_at,omitempty"`
 	DefaultQuantity        int        `json:"default_quantity"`
@@ -48,6 +53,24 @@ type AutomationRun struct {
 	SkippedCount   int        `json:"skipped_count"`
 	FailedCount    int        `json:"failed_count"`
 	Summary        string     `json:"summary,omitempty"`
+}
+
+type RechargeApproval struct {
+	ID                int64      `json:"id"`
+	SimCard           string     `json:"sim_card"`
+	CNPJ              string     `json:"cnpj"`
+	SubscriberName    string     `json:"subscriber_name"`
+	ContractStatus    string     `json:"contract_status"`
+	Quantity          int        `json:"quantity"`
+	Status            string     `json:"status"`
+	Reason            string     `json:"reason"`
+	LastRechargeAt    *time.Time `json:"last_recharge_at,omitempty"`
+	NextRechargeDueAt *time.Time `json:"next_recharge_due_at,omitempty"`
+	OperationID       *int64     `json:"operation_id,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	ApprovedAt        *time.Time `json:"approved_at,omitempty"`
+	RejectedAt        *time.Time `json:"rejected_at,omitempty"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
 }
 
 type RechargeDecision struct {

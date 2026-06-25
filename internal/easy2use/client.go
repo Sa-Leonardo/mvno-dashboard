@@ -62,6 +62,19 @@ type AddBalanceResponse struct {
 	Americanet    json.RawMessage `json:"americanet"`
 }
 
+type ListStockResponse struct {
+	StatusCodeTip any        `json:"codigo_status_tip"`
+	Results       []StockSIM `json:"results"`
+}
+
+type StockSIM struct {
+	Date     string `json:"data"`
+	SimCard  string `json:"sim_card"`
+	Status   string `json:"status"`
+	ESim     *bool  `json:"eSim,omitempty"`
+	Operator string `json:"operadora,omitempty"`
+}
+
 func (c *Client) ListSubscribers(ctx context.Context) (ListSubscribersResponse, []byte, int, error) {
 	var out ListSubscribersResponse
 	body, statusCode, err := c.do(ctx, http.MethodGet, "/assinantes/listar", nil)
@@ -70,6 +83,18 @@ func (c *Client) ListSubscribers(ctx context.Context) (ListSubscribersResponse, 
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		return out, body, statusCode, fmt.Errorf("decode subscribers response: %w", err)
+	}
+	return out, body, statusCode, nil
+}
+
+func (c *Client) ListStock(ctx context.Context) (ListStockResponse, []byte, int, error) {
+	var out ListStockResponse
+	body, statusCode, err := c.do(ctx, http.MethodGet, "/estoque/listar", nil)
+	if err != nil {
+		return out, body, statusCode, err
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return out, body, statusCode, fmt.Errorf("decode stock response: %w", err)
 	}
 	return out, body, statusCode, nil
 }

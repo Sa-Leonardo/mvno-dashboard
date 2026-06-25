@@ -1,6 +1,12 @@
-# Automacao chip-MOV
+# MVNO Dashboard
 
-MVP em Go + Gin para adicionar 1 GB preventivo em ICCIDs vinculados a 2 CNPJs, usando a API Tip Brasil/Easy2Use.
+Sistema independente em Go + Gin + SQLite para gerenciar ICCIDs/SIM Cards, consultar dados da API Tip Brasil/Easy2Use, visualizar dashboard operacional e executar recargas controladas.
+
+## Requisitos
+
+- Go 1.22 ou superior
+- Acesso a internet para baixar dependencias na primeira execucao
+- Token da API Easy2Use/Tip Brasil
 
 ## Configuracao
 
@@ -19,35 +25,92 @@ RECHARGE_SAFETY_WINDOW_DAYS=10
 DEFAULT_RECHARGE_QUANTITY=1
 PROVIDER_REQUEST_DELAY_MS=1200
 ENABLE_REAL_RECHARGE=false
+ENABLE_DEV_ROUTES=false
 ```
 
-## Rodar
+Nunca suba o arquivo `.env` para o GitHub.
+
+## Rodar em desenvolvimento
+
+Na raiz do projeto:
+
+```bash
+go run main.go
+```
+
+Ou:
 
 ```bash
 go run ./cmd/api
 ```
 
-Ou gerar binario:
-
-```bash
-go build -o dist/chipmov-api.exe ./cmd/api
-```
-
-## Endpoints
-
-Todos os endpoints abaixo, exceto `/health`, exigem:
+Acesse:
 
 ```text
-X-Admin-Key: sua_chave
+http://localhost:8080
+```
+
+Relatorios:
+
+```text
+http://localhost:8080/relatorios
+```
+
+Use no campo "Chave interna" o mesmo valor configurado em `ADMIN_KEY`.
+
+## Gerar binario
+
+Windows:
+
+```bash
+go build -o dist/mvno-dashboard.exe ./cmd/api
+```
+
+Linux/macOS:
+
+```bash
+go build -o dist/mvno-dashboard ./cmd/api
+```
+
+## Rodar em outro PC
+
+1. Instale Go 1.22+.
+2. Clone o repositorio novo.
+3. Copie `.env.example` para `.env`.
+4. Preencha `ADMIN_KEY`, `EASY2USE_USER_TOKEN` e `ALLOWED_CNPJS`.
+5. Rode:
+
+```bash
+go mod download
+go run main.go
+```
+
+O banco SQLite sera criado automaticamente em `./data/app.db`.
+
+## Subir para um novo GitHub
+
+Este projeto foi separado do repositorio antigo. Para conectar a um novo repositorio:
+
+```bash
+git remote add origin https://github.com/SEU_USUARIO/SEU_NOVO_REPOSITORIO.git
+git add .
+git commit -m "Inicializa MVNO Dashboard"
+git push -u origin main
+```
+
+## Rotas principais
+
+Todas as rotas abaixo, exceto `/health`, exigem o header:
+
+```text
+x-api-key: sua_ADMIN_KEY
 ```
 
 Tambem e aceito:
 
 ```text
-x-api-key: sua_chave
+X-Admin-Key: sua_ADMIN_KEY
 ```
-
-Use o mesmo valor configurado em `ADMIN_KEY` no `.env`.
 
 ### Saude
 
@@ -57,21 +120,27 @@ GET /health
 
 ### Sincronizar assinantes
 
-Busca assinantes na API externa, filtra somente os CNPJs permitidos e salva os ICCIDs.
+Busca assinantes/contratos na API externa e salva ICCIDs localmente.
 
 ```text
 POST /sync/assinantes
 ```
 
+### Sincronizar estoque
+
+Busca SIM Cards, status, operadora e eSIM na API externa.
+
+```text
+POST /sync/estoque
+```
+
 ### Sincronizar ultima recarga
 
-Consulta a ultima recarga de cada ICCID salvo e calcula `next_recharge_due_at`.
+Consulta a ultima recarga de cada ICCID salvo e calcula a proxima janela de recarga.
 
 ```text
 POST /sync/ultima-recarga
 ```
-
-Por causa do rate limit da API externa, essa rotina espera `PROVIDER_REQUEST_DELAY_MS` entre consultas. O padrao recomendado e `1200`, que fica abaixo de 60 chamadas por minuto.
 
 ### Listar ICCIDs
 
@@ -79,7 +148,7 @@ Por causa do rate limit da API externa, essa rotina espera `PROVIDER_REQUEST_DEL
 GET /iccids
 ```
 
-### Adicionar saldo manual
+### Recarga manual
 
 ```text
 POST /iccids/{iccid}/saldo
@@ -94,26 +163,15 @@ Body:
 }
 ```
 
-Para chamar a API real de recarga, configure no `.env`:
+Para permitir recarga real:
 
 ```text
 ENABLE_REAL_RECHARGE=true
 ```
 
-Depois reinicie o servidor e envie:
+## Automacao
 
-```json
-{
-  "quantity": 1,
-  "dry_run": false
-}
-```
-
-Atencao: a API externa pode aplicar uma franquia diferente da quantidade enviada, conforme regra da operadora/plano. Em teste real, foi observado que `quantity: 1` pode resultar em credito maior no provedor.
-
-### Rotina para n8n
-
-Teste seguro:
+Simular rotina:
 
 ```text
 POST /automation/check-recharges
@@ -127,33 +185,13 @@ Body:
 }
 ```
 
-Execucao real:
+Criar pendencias para aprovacao manual:
 
 ```json
 {
-  "dry_run": false
+  "create_approvals": true
 }
 ```
-
-### Proxima execucao util
-
-```text
-GET /automation/next-run
-```
-
-Esse endpoint considera apenas ICCIDs acionaveis:
-
-```text
-auto_recharge_enabled = true
-contract_status = EM USO
-next_recharge_due_at >= hoje
-```
-
-Resposta inclui `next_recharge_iccids`, com os ICCIDs e CNPJs que pertencem a proxima data de recarga.
-
-## Respostas da automacao
-
-`POST /automation/check-recharges` retorna, em `results`, o ICCID, CNPJ, nome do assinante e dados da operacao para cada item avaliado ou recarregado.
 
 ## Regra preventiva
 
@@ -161,4 +199,4 @@ Resposta inclui `next_recharge_iccids`, com os ICCIDs e CNPJs que pertencem a pr
 next_recharge_due_at = ultima_recarga + 11 meses - 10 dias
 ```
 
-Quando `hoje >= next_recharge_due_at`, a rotina automatica adiciona 1 GB.
+Quando `hoje >= next_recharge_due_at`, a rotina pode adicionar saldo conforme configuracao e aprovacao.
