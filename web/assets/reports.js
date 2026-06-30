@@ -16,6 +16,8 @@ const statusColors = {
 
 const cnpjNames = {
   "58420964000179": "MOV Fit",
+  "58420964000330": "MOV Fit CT",
+  "58420964000500": "MOV Fit CT",
   "15070244000118": "MOV Fibra",
 };
 
@@ -211,12 +213,13 @@ function renderAll() {
 function renderMOVSummary() {
   const movItems = contractRows().filter((item) => Boolean(cnpjNames[item.cnpj]));
   const summary = summarizeByCNPJ(movItems);
+  for (const cnpj of Object.keys(cnpjNames)) {
+    if (!summary.has(cnpj)) {
+      summary.set(cnpj, { cnpj, total: 0, available: 0, active: 0, blocked: 0, cancelled: 0, other: 0, items: [] });
+    }
+  }
   els.movSummaryBody.innerHTML = "";
   const rows = [...summary.values()].sort((a, b) => formatCNPJ(a.cnpj).localeCompare(formatCNPJ(b.cnpj)));
-  if (!rows.length) {
-    els.movSummaryBody.append(emptyRow(7, "Nenhum contrato MOV encontrado na base."));
-    return;
-  }
   for (const item of rows) {
     els.movSummaryBody.append(row([
       formatCNPJ(item.cnpj),

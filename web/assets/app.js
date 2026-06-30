@@ -10,6 +10,8 @@ const state = {
 
 const cnpjNames = {
   "58420964000179": "MOV Fit",
+  "58420964000330": "MOV Fit CT",
+  "58420964000500": "MOV Fit CT",
   "15070244000118": "MOV Fibra",
 };
 

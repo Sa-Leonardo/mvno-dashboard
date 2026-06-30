@@ -1,11 +1,12 @@
 # MVNO Dashboard
 
-Sistema independente em Go + Gin + SQLite para gerenciar ICCIDs/SIM Cards, consultar dados da API Tip Brasil/Easy2Use, visualizar dashboard operacional e executar recargas controladas.
+Painel analitico em Go + Gin para consultar dados MVNO na API Easy2Use/Tip Brasil e exibir relatorios de linhas, contratos, estoque, planos, status e estimativas financeiras.
+
+O backend nao usa banco de dados. Ele funciona apenas como proxy seguro para a API externa, protegendo o token e mantendo um cache em memoria enquanto o processo esta aberto.
 
 ## Requisitos
 
 - Go 1.22 ou superior
-- Acesso a internet para baixar dependencias na primeira execucao
 - Token da API Easy2Use/Tip Brasil
 
 ## Configuracao
@@ -18,19 +19,16 @@ GIN_MODE=release
 ADMIN_KEY=troque_esta_chave
 EASY2USE_BASE_URL=https://mvno.tipbrasil.com.br/api/public
 EASY2USE_USER_TOKEN=token_aqui
-ALLOWED_CNPJS=00000000000100,11111111111100
-DATABASE_PATH=./data/app.db
-RECHARGE_INTERVAL_MONTHS=11
-RECHARGE_SAFETY_WINDOW_DAYS=10
+ALLOWED_CNPJS=58420964000179,15070244000118,58420964000330,58420964000500
+RECHARGE_INTERVAL_DAYS=90
+RECHARGE_SAFETY_WINDOW_DAYS=0
 DEFAULT_RECHARGE_QUANTITY=1
 PROVIDER_REQUEST_DELAY_MS=1200
-ENABLE_REAL_RECHARGE=false
-ENABLE_DEV_ROUTES=false
 ```
 
 Nunca suba o arquivo `.env` para o GitHub.
 
-## Rodar em desenvolvimento
+## Rodar
 
 Na raiz do projeto:
 
@@ -50,53 +48,89 @@ Acesse:
 http://localhost:8080
 ```
 
-Relatorios:
-
-```text
-http://localhost:8080/relatorios
-```
-
 Use no campo "Chave interna" o mesmo valor configurado em `ADMIN_KEY`.
 
-## Gerar binario
+## Deploy
 
-Windows:
+O projeto esta pronto para deploy em plataformas que suportam Go. A plataforma precisa receber estas variaveis de ambiente:
 
-```bash
-go build -o dist/mvno-dashboard.exe ./cmd/api
+```text
+ADMIN_KEY=sua_chave_interna_forte
+EASY2USE_BASE_URL=https://mvno.tipbrasil.com.br/api/public
+EASY2USE_USER_TOKEN=token_real
+ALLOWED_CNPJS=58420964000179,15070244000118,58420964000330,58420964000500
+RECHARGE_INTERVAL_DAYS=90
+RECHARGE_SAFETY_WINDOW_DAYS=0
+DEFAULT_RECHARGE_QUANTITY=1
+PROVIDER_REQUEST_DELAY_MS=1200
+GIN_MODE=release
 ```
 
-Linux/macOS:
+Nao configure essas variaveis em arquivo `.env` no servidor de deploy. Use a area de secrets/environment variables da plataforma.
 
-```bash
-go build -o dist/mvno-dashboard ./cmd/api
+### Vercel
+
+Funciona na Vercel usando o preset/runtime Go. O projeto inclui `vercel.json` com:
+
+```json
+{
+  "version": 2,
+  "framework": "go"
+}
 ```
 
-## Rodar em outro PC
+Passos:
 
-1. Instale Go 1.22+.
-2. Clone o repositorio novo.
-3. Copie `.env.example` para `.env`.
-4. Preencha `ADMIN_KEY`, `EASY2USE_USER_TOKEN` e `ALLOWED_CNPJS`.
-5. Rode:
+1. Suba o repositorio no GitHub.
+2. Importe o projeto na Vercel.
+3. Em Environment Variables, configure as variaveis listadas acima.
+4. Deploy.
+5. Acesse a URL gerada e informe o valor de `ADMIN_KEY` no campo "Chave interna".
+
+Observacoes importantes:
+
+- A Vercel pode reiniciar ou escalar a funcao a qualquer momento. Como este projeto nao usa banco, o cache em memoria pode zerar e os dados serao buscados novamente da API.
+- `POST /sync/ultima-recarga` consulta um ICCID por vez e pode demorar. Se a base for grande, pode bater no limite de duracao da funcao da Vercel. Nesse caso, prefira sincronizar apenas assinantes/estoque ou mover essa rotina para uma plataforma com processo persistente.
+- O frontend esta embutido no binario Go, entao nao depende de arquivos estaticos soltos no ambiente da Vercel.
+
+### Render, Railway ou similar
+
+1. Conecte o repositorio GitHub.
+2. Escolha deploy por Dockerfile, se disponivel.
+3. Configure as variaveis de ambiente acima.
+4. Use `/health` como health check, se a plataforma pedir.
+5. Depois de publicar, acesse a URL gerada e informe o valor de `ADMIN_KEY` no campo "Chave interna".
+
+### VPS com Docker
+
+Build:
 
 ```bash
-go mod download
-go run main.go
+docker build -t mvno-dashboard .
 ```
 
-O banco SQLite sera criado automaticamente em `./data/app.db`.
-
-## Subir para um novo GitHub
-
-Este projeto foi separado do repositorio antigo. Para conectar a um novo repositorio:
+Run:
 
 ```bash
-git remote add origin https://github.com/SEU_USUARIO/SEU_NOVO_REPOSITORIO.git
-git add .
-git commit -m "Inicializa MVNO Dashboard"
-git push -u origin main
+docker run --rm -p 8080:8080 \
+  -e ADMIN_KEY="sua_chave_interna_forte" \
+  -e EASY2USE_BASE_URL="https://mvno.tipbrasil.com.br/api/public" \
+  -e EASY2USE_USER_TOKEN="token_real" \
+  -e ALLOWED_CNPJS="58420964000179,15070244000118,58420964000330,58420964000500" \
+  -e RECHARGE_INTERVAL_DAYS="90" \
+  -e RECHARGE_SAFETY_WINDOW_DAYS="0" \
+  mvno-dashboard
 ```
+
+Acesse `http://localhost:8080`.
+
+## Como os dados funcionam
+
+- `GET /iccids` carrega dados da API externa quando o cache em memoria esta vazio.
+- `POST /sync/assinantes` busca assinantes/contratos e atualiza o cache em memoria.
+- `POST /sync/estoque` busca estoque de SIM Cards e cruza com os contratos em memoria.
+- `POST /sync/ultima-recarga` consulta a ultima recarga dos ICCIDs carregados e calcula a proxima data estimada usando `RECHARGE_INTERVAL_DAYS`.
+- Ao reiniciar o servidor, o cache em memoria e zerado.
 
 ## Rotas principais
 
@@ -118,28 +152,14 @@ X-Admin-Key: sua_ADMIN_KEY
 GET /health
 ```
 
-### Sincronizar assinantes
+Retorna o modo atual:
 
-Busca assinantes/contratos na API externa e salva ICCIDs localmente.
-
-```text
-POST /sync/assinantes
-```
-
-### Sincronizar estoque
-
-Busca SIM Cards, status, operadora e eSIM na API externa.
-
-```text
-POST /sync/estoque
-```
-
-### Sincronizar ultima recarga
-
-Consulta a ultima recarga de cada ICCID salvo e calcula a proxima janela de recarga.
-
-```text
-POST /sync/ultima-recarga
+```json
+{
+  "status": "ok",
+  "mode": "report-only",
+  "storage": "memory"
+}
 ```
 
 ### Listar ICCIDs
@@ -148,55 +168,50 @@ POST /sync/ultima-recarga
 GET /iccids
 ```
 
-### Recarga manual
+### Resumo por CNPJ e status
 
 ```text
-POST /iccids/{iccid}/saldo
+GET /iccids/summary
 ```
 
-Body:
-
-```json
-{
-  "quantity": 1,
-  "dry_run": true
-}
-```
-
-Para permitir recarga real:
+### Sincronizar assinantes
 
 ```text
-ENABLE_REAL_RECHARGE=true
+POST /sync/assinantes
 ```
 
-## Automacao
-
-Simular rotina:
+### Sincronizar estoque
 
 ```text
-POST /automation/check-recharges
+POST /sync/estoque
 ```
 
-Body:
-
-```json
-{
-  "dry_run": true
-}
-```
-
-Criar pendencias para aprovacao manual:
-
-```json
-{
-  "create_approvals": true
-}
-```
-
-## Regra preventiva
+### Sincronizar ultima recarga
 
 ```text
-next_recharge_due_at = ultima_recarga + 11 meses - 10 dias
+POST /sync/ultima-recarga
 ```
 
-Quando `hoje >= next_recharge_due_at`, a rotina pode adicionar saldo conforme configuracao e aprovacao.
+Essa rota pode levar alguns minutos porque consulta a API externa para cada ICCID carregado.
+
+### Proxima data estimada
+
+```text
+GET /automation/next-run
+```
+
+Mantido por compatibilidade com a interface. Ele nao executa recargas; apenas calcula datas a partir do cache em memoria.
+
+## Modo relatorio
+
+As rotas antigas de recarga, aprovacoes e operacoes foram desativadas. O sistema nao executa `saldo/adicionar`, nao cria pendencias e nao grava historico operacional.
+
+O objetivo atual e responder perguntas como:
+
+- Quantas linhas existem na base?
+- Quantas estao ativas, bloqueadas, canceladas ou em estoque?
+- Quantas sao eSIM ou fisicas?
+- Qual a distribuicao por CNPJ, plano e operadora?
+- Qual a receita mensal estimada por plano?
+- Quais linhas nao possuem ultima recarga informada?
+

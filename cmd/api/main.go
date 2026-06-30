@@ -12,7 +12,6 @@ import (
 	"mvnodashboard/internal/app"
 	"mvnodashboard/internal/config"
 	"mvnodashboard/internal/easy2use"
-	"mvnodashboard/internal/storage"
 )
 
 func main() {
@@ -24,25 +23,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	db, err := storage.Open(cfg.DatabasePath)
-	if err != nil {
-		logger.Error("failed to open database", "error", err)
-		os.Exit(1)
-	}
-	defer db.Close()
-
-	if err := db.Migrate(context.Background()); err != nil {
-		logger.Error("failed to migrate database", "error", err)
-		os.Exit(1)
-	}
-
-	if err := db.UpsertAllowedCNPJs(context.Background(), cfg.AllowedCNPJs); err != nil {
-		logger.Error("failed to seed allowed CNPJs", "error", err)
-		os.Exit(1)
-	}
-
 	provider := easy2use.NewClient(cfg.Easy2UseBaseURL, cfg.Easy2UseUserToken, logger)
-	server := app.NewServer(cfg, db, provider, logger)
+	server := app.NewServer(cfg, provider, logger)
 
 	httpServer := &http.Server{
 		Addr:              cfg.AppAddr,

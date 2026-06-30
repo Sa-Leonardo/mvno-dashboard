@@ -3,28 +3,28 @@ package domain
 import "time"
 
 type ICCID struct {
-	ID                     int64      `json:"id"`
-	CNPJ                   string     `json:"cnpj"`
-	SubscriberName         string     `json:"subscriber_name"`
-	SimCard                string     `json:"sim_card"`
-	PhoneNumber            string     `json:"phone_number"`
-	ContractNumber         string     `json:"contract_number"`
-	ContractStatus         string     `json:"contract_status"`
-	PlanName               string     `json:"plan_name"`
-	StockStatus            string     `json:"stock_status,omitempty"`
-	StockIncludedAt        *time.Time `json:"stock_included_at,omitempty"`
-	ESim                   *bool      `json:"esim,omitempty"`
-	Operator               string     `json:"operator,omitempty"`
-	StockSyncAt            *time.Time `json:"stock_sync_at,omitempty"`
-	LastRechargeAt         *time.Time `json:"last_recharge_at,omitempty"`
-	NextRechargeDueAt      *time.Time `json:"next_recharge_due_at,omitempty"`
-	DefaultQuantity        int        `json:"default_quantity"`
-	RechargeIntervalMonths int        `json:"recharge_interval_months"`
-	SafetyWindowDays       int        `json:"safety_window_days"`
-	AutoRechargeEnabled    bool       `json:"auto_recharge_enabled"`
-	LastSyncAt             time.Time  `json:"last_sync_at"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
+	ID                   int64      `json:"id"`
+	CNPJ                 string     `json:"cnpj"`
+	SubscriberName       string     `json:"subscriber_name"`
+	SimCard              string     `json:"sim_card"`
+	PhoneNumber          string     `json:"phone_number"`
+	ContractNumber       string     `json:"contract_number"`
+	ContractStatus       string     `json:"contract_status"`
+	PlanName             string     `json:"plan_name"`
+	StockStatus          string     `json:"stock_status,omitempty"`
+	StockIncludedAt      *time.Time `json:"stock_included_at,omitempty"`
+	ESim                 *bool      `json:"esim,omitempty"`
+	Operator             string     `json:"operator,omitempty"`
+	StockSyncAt          *time.Time `json:"stock_sync_at,omitempty"`
+	LastRechargeAt       *time.Time `json:"last_recharge_at,omitempty"`
+	NextRechargeDueAt    *time.Time `json:"next_recharge_due_at,omitempty"`
+	DefaultQuantity      int        `json:"default_quantity"`
+	RechargeIntervalDays int        `json:"recharge_interval_days"`
+	SafetyWindowDays     int        `json:"safety_window_days"`
+	AutoRechargeEnabled  bool       `json:"auto_recharge_enabled"`
+	LastSyncAt           time.Time  `json:"last_sync_at"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 type GBOperation struct {
@@ -78,6 +78,6 @@ type RechargeDecision struct {
 	Reason string `json:"reason"`
 }
 
-func ComputeNextRecharge(lastRechargeAt time.Time, intervalMonths int, safetyWindowDays int) time.Time {
-	return lastRechargeAt.AddDate(0, intervalMonths, -safetyWindowDays)
+func ComputeNextRecharge(lastRechargeAt time.Time, intervalDays int, safetyWindowDays int) time.Time {
+	return lastRechargeAt.AddDate(0, 0, intervalDays-safetyWindowDays)
 }

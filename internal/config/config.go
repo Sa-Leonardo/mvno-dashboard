@@ -17,8 +17,7 @@ type Config struct {
 	Easy2UseBaseURL          string
 	Easy2UseUserToken        string
 	AllowedCNPJs             []string
-	DatabasePath             string
-	RechargeIntervalMonths   int
+	RechargeIntervalDays     int
 	RechargeSafetyWindowDays int
 	DefaultRechargeQuantity  int
 	ProviderRequestDelay     time.Duration
@@ -30,14 +29,13 @@ func Load() (Config, error) {
 	_ = loadDotEnv(findDotEnv())
 
 	cfg := Config{
-		AppAddr:                  getEnv("APP_ADDR", ":8080"),
+		AppAddr:                  getAppAddr(),
 		AdminKey:                 os.Getenv("ADMIN_KEY"),
 		Easy2UseBaseURL:          strings.TrimRight(getEnv("EASY2USE_BASE_URL", "https://mvno.tipbrasil.com.br/api/public"), "/"),
 		Easy2UseUserToken:        os.Getenv("EASY2USE_USER_TOKEN"),
 		AllowedCNPJs:             parseCSV(os.Getenv("ALLOWED_CNPJS")),
-		DatabasePath:             getEnv("DATABASE_PATH", "./data/app.db"),
-		RechargeIntervalMonths:   getEnvInt("RECHARGE_INTERVAL_MONTHS", 11),
-		RechargeSafetyWindowDays: getEnvInt("RECHARGE_SAFETY_WINDOW_DAYS", 10),
+		RechargeIntervalDays:     getEnvInt("RECHARGE_INTERVAL_DAYS", 90),
+		RechargeSafetyWindowDays: getEnvInt("RECHARGE_SAFETY_WINDOW_DAYS", 0),
 		DefaultRechargeQuantity:  getEnvInt("DEFAULT_RECHARGE_QUANTITY", 1),
 		ProviderRequestDelay:     time.Duration(getEnvInt("PROVIDER_REQUEST_DELAY_MS", 1200)) * time.Millisecond,
 		EnableRealRecharge:       getEnvBool("ENABLE_REAL_RECHARGE", false),
@@ -53,8 +51,8 @@ func Load() (Config, error) {
 	if len(cfg.AllowedCNPJs) == 0 {
 		return Config{}, errors.New("ALLOWED_CNPJS is required")
 	}
-	if cfg.RechargeIntervalMonths <= 0 {
-		return Config{}, errors.New("RECHARGE_INTERVAL_MONTHS must be greater than zero")
+	if cfg.RechargeIntervalDays <= 0 {
+		return Config{}, errors.New("RECHARGE_INTERVAL_DAYS must be greater than zero")
 	}
 	if cfg.RechargeSafetyWindowDays < 0 {
 		return Config{}, errors.New("RECHARGE_SAFETY_WINDOW_DAYS cannot be negative")
@@ -64,6 +62,16 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func getAppAddr() string {
+	if value := strings.TrimSpace(os.Getenv("APP_ADDR")); value != "" {
+		return value
+	}
+	if port := strings.TrimSpace(os.Getenv("PORT")); port != "" {
+		return ":" + port
+	}
+	return ":8080"
 }
 
 func findDotEnv() string {
